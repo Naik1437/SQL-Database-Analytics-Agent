@@ -106,7 +106,8 @@ def reflection_node(state: AgentState, *, llm: Any) -> AgentState:
                 "error_message": "", "logs": state.get("logs", []) +
                 [f"Self-correction attempt {state.get('retry_count', 0) + 1} generated validated SQL."]}
     except Exception as exc:
-        return {"retry_count": state.get("retry_count", 0) + 1, "error_message": str(exc),
+        return {"generated_sql": "", "retry_count": state.get("retry_count", 0) + 1,
+                "error_message": str(exc),
                 "logs": state.get("logs", []) + ["Correction output failed validation."]}
 
 

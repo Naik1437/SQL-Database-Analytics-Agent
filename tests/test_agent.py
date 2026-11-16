@@ -1,10 +1,9 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 
 from app.graph import build_graph, execute_query_node, reflection_node
-from app.security import UnsafeQueryError
 from database.seed import seed_database
 
 
@@ -34,8 +33,16 @@ def test_graph_runs_generated_read_query(engine):
 
 
 def test_execution_validates_before_database(engine):
-    with pytest.raises(UnsafeQueryError):
-        execute_query_node({"generated_sql": "DELETE FROM orders", "logs": []}, engine=engine)
+    executed_statements = []
+    event.listen(engine, "before_cursor_execute",
+                 lambda conn, cursor, statement, parameters, context, executemany:
+                 executed_statements.append(statement))
+
+    result = execute_query_node({"generated_sql": "DELETE FROM orders", "logs": []}, engine=engine)
+
+    assert result["db_result"] == []
+    assert "Only read-only SELECT queries" in result["error_message"]
+    assert executed_statements == []
 
 
 def test_reflection_uses_schema_and_database_error():
