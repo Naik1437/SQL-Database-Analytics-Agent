@@ -14,6 +14,7 @@ from app.llm_provider import create_gemini_chat_model
 from app.security import UnsafeQueryError, inspect_user_input, validate_read_only_sql
 
 MAX_RETRIES = 3
+MAX_GRAPH_STEPS = 16
 
 
 class AgentState(TypedDict, total=False):
@@ -26,6 +27,7 @@ class AgentState(TypedDict, total=False):
     logs: list[str]
     history: list[dict[str, str]]
     security_blocked: bool
+    llm_error: bool
 
 
 def create_engine_from_url(database_url: str | None = None) -> Engine:
@@ -91,12 +93,35 @@ def _normalize_sql_response(result: Any) -> str:
     return sql
 
 
+class GeminiRequestError(RuntimeError):
+    """Safe, credential-free message for a failed model request."""
+
+
+def _invoke_llm(llm: Any, prompt: str) -> Any:
+    """Invoke the model without allowing provider diagnostics to leak secrets."""
+    try:
+        return llm.invoke(prompt)
+    except Exception as exc:
+        error_name = type(exc).__name__.casefold()
+        error_text = str(exc).casefold()
+        if any(token in error_name or token in error_text for token in ("timeout", "deadline")):
+            message = "Gemini request timed out after 30 seconds. Check the network and selected model, then retry."
+        else:
+            message = "Gemini request failed. Check the network, API key configuration, model name, and quota."
+        raise GeminiRequestError(message) from None
+
+
 def generate_sql_node(state: AgentState, *, llm: Any) -> AgentState:
     prompt = ("Write exactly one SQLite read-only SELECT query for the user request. "
               "Use only the schema below. Return SQL only.\n\nSchema:\n" + state.get("schema", "") +
               "\n\nQuestion: " + state.get("user_query", ""))
     try:
-        sql = validate_read_only_sql(_normalize_sql_response(llm.invoke(prompt)))
+        response = _invoke_llm(llm, prompt)
+    except GeminiRequestError as exc:
+        return {"generated_sql": "", "error_message": str(exc), "llm_error": True,
+                "logs": state.get("logs", []) + ["Gemini request failed during SQL generation."]}
+    try:
+        sql = validate_read_only_sql(_normalize_sql_response(response))
         return {"generated_sql": sql, "error_message": "",
                 "logs": state.get("logs", []) + ["Generated and validated read-only SQL."]}
     except Exception as exc:
@@ -128,7 +153,13 @@ def reflection_node(state: AgentState, *, llm: Any) -> AgentState:
               "\nFailed SQL:\n" + state.get("generated_sql", "") + "\nDatabase error:\n" +
               state.get("error_message", ""))
     try:
-        sql = validate_read_only_sql(_normalize_sql_response(llm.invoke(prompt)))
+        response = _invoke_llm(llm, prompt)
+    except GeminiRequestError as exc:
+        return {"generated_sql": "", "retry_count": state.get("retry_count", 0) + 1,
+                "error_message": str(exc), "llm_error": True,
+                "logs": state.get("logs", []) + ["Gemini request failed during SQL correction."]}
+    try:
+        sql = validate_read_only_sql(_normalize_sql_response(response))
         return {"generated_sql": sql, "retry_count": state.get("retry_count", 0) + 1,
                 "error_message": "", "logs": state.get("logs", []) +
                 [f"Self-correction attempt {state.get('retry_count', 0) + 1} generated validated SQL."]}
@@ -176,7 +207,7 @@ def build_graph(*, engine: Engine | None = None, llm: Any = None):
     def select_after_guard(state): return "inspect_schema_node" if not state.get("error_message") else "done"
     def select_after_generate(state): return "execute_query_node" if not state.get("error_message") else "done"
     def select_after_execute(state): return "reflection_node" if state.get("error_message") and state.get("retry_count", 0) < MAX_RETRIES else "done"
-    def select_after_reflect(state): return "execute_query_node" if state.get("generated_sql") and not state.get("error_message") else ("reflection_node" if state.get("retry_count", 0) < MAX_RETRIES else "done")
+    def select_after_reflect(state): return "execute_query_node" if state.get("generated_sql") and not state.get("error_message") else ("reflection_node" if not state.get("llm_error") and state.get("retry_count", 0) < MAX_RETRIES else "done")
 
     graph = StateGraph(AgentState)
     graph.add_node("guard", guard)
@@ -197,4 +228,6 @@ def build_graph(*, engine: Engine | None = None, llm: Any = None):
 def run_query(query: str, *, engine: Engine | None = None, llm: Any = None) -> AgentState:
     state = {"user_query": query, "generated_sql": "", "db_result": [], "error_message": "",
              "retry_count": 0, "schema": "", "logs": [], "history": []}
-    return build_graph(engine=engine, llm=llm).invoke(state)
+    return build_graph(engine=engine, llm=llm).invoke(
+        state, config={"recursion_limit": MAX_GRAPH_STEPS}
+    )

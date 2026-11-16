@@ -6,6 +6,8 @@ A natural-language analytics application built with LangGraph, LangChain, SQLAlc
 
 The LangGraph `StateGraph` keeps the user question, generated SQL, query results, error, and correction retry count. Before schema inspection, the raw question passes through the deterministic safety filter. Live NeMo input-model inspection is a separate, explicit opt-in; its deterministic safety checks remain active without it. The workflow reflects the SQLite schema with SQLAlchemy, asks the configured Gemini chat model for one query, validates it with SQLGlot, and executes it through a read-only SQLite connection. A database error is passed with the reflected schema to the correction step, which may retry up to three times. Streamlit presents the result table, SQL, logs, correction history, and suitable Plotly charts.
 
+Gemini requests use a 30-second per-request timeout and disable the SDK's automatic retries. Model failures are returned to the dashboard as credential-safe errors. The graph also has a finite recursion limit as a final safeguard; SQL correction remains capped at three attempts.
+
 Technologies: Python 3.11, LangGraph, LangChain, `langchain-google-genai`, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Plotly, Pandas, pytest, and python-dotenv. `langchain-openai` is retained only for the optional live NeMo inference integration; SQL generation uses Gemini.
 
 ## Requirements

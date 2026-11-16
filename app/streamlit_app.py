@@ -8,7 +8,7 @@ import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
-from app.graph import build_graph, create_engine_from_url
+from app.graph import MAX_GRAPH_STEPS, build_graph, create_engine_from_url
 from app.llm_provider import GeminiConfigurationError, check_gemini_provider_configuration
 
 load_dotenv()
@@ -170,13 +170,16 @@ def main() -> None:
         if not query.strip():
             st.error("Enter a business question before running the query.")
         else:
+            # Do not leave results from a previous request visible if this run
+            # fails while building or executing the workflow.
+            st.session_state["last_run"] = None
             try:
                 graph = build_graph(engine=create_engine_from_url())
                 with st.spinner("Checking the request and running the analytics workflow…"):
                     st.session_state["last_run"] = graph.invoke({
                         "user_query": query, "generated_sql": "", "db_result": [], "error_message": "",
                         "retry_count": 0, "schema": "", "logs": [], "history": [],
-                    })
+                    }, config={"recursion_limit": MAX_GRAPH_STEPS})
             except GeminiConfigurationError as exc:
                 st.error(_safe_display_text(str(exc)))
             except Exception:

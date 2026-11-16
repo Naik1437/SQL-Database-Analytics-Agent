@@ -1,6 +1,7 @@
 import pytest
 
 from app.llm_provider import (
+    GEMINI_REQUEST_TIMEOUT_SECONDS,
     GeminiConfigurationError,
     check_gemini_provider_configuration,
     create_gemini_chat_model,
@@ -38,6 +39,8 @@ def test_gemini_factory_uses_configured_model_without_network_call():
         "api_key": "unit-test-key",
         "vertexai": False,
         "temperature": 0,
+        "request_timeout": GEMINI_REQUEST_TIMEOUT_SECONDS,
+        "retries": 0,
     }
 
 
@@ -48,6 +51,10 @@ def test_installed_gemini_integration_constructs_without_inference():
     })
     assert model.__class__.__name__ == "ChatGoogleGenerativeAI"
     assert model.model == "gemini-test-model"
+    # The installed integration aliases its constructor's request_timeout to
+    # the normalized public `timeout` attribute.
+    assert model.timeout == GEMINI_REQUEST_TIMEOUT_SECONDS
+    assert model.max_retries == 0
 
 
 def test_missing_google_api_key_fails_before_model_construction(monkeypatch):

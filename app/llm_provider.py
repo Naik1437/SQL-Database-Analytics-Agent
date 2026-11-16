@@ -6,6 +6,9 @@ import os
 from typing import Callable, Mapping
 
 
+GEMINI_REQUEST_TIMEOUT_SECONDS = 30.0
+
+
 class GeminiConfigurationError(ValueError):
     """Raised when Gemini cannot be configured safely from the environment."""
 
@@ -65,6 +68,10 @@ def create_gemini_chat_model(
             api_key=api_key,
             vertexai=False,
             temperature=0,
+            # ChatGoogleGenerativeAI otherwise allows six SDK retries and an
+            # unbounded request duration, which can leave Streamlit waiting.
+            request_timeout=GEMINI_REQUEST_TIMEOUT_SECONDS,
+            retries=0,
         )
     except Exception:
         # Provider exceptions can include request/configuration details; do not

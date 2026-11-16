@@ -100,6 +100,42 @@ def test_successful_query_does_not_trigger_correction(engine):
     assert len(llm.prompts) == 1
 
 
+def test_gemini_timeout_returns_clear_error_without_leaking_provider_details(engine):
+    class TimedOutLLM:
+        def invoke(self, _prompt):
+            raise TimeoutError("request timed out; api_key=do-not-display")
+
+    result = build_graph(engine=engine, llm=TimedOutLLM()).invoke(initial_state("How many orders?"))
+
+    assert result["error_message"] == (
+        "Gemini request timed out after 30 seconds. Check the network and selected model, then retry."
+    )
+    assert result["llm_error"] is True
+    assert "do-not-display" not in result["error_message"]
+    assert result["db_result"] == []
+
+
+def test_reflection_gemini_failure_stops_correction_loop(engine):
+    class FailsOnCorrection:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, _prompt):
+            self.calls += 1
+            if self.calls == 1:
+                return "SELECT created_at FROM orders"
+            raise TimeoutError("deadline exceeded")
+
+    llm = FailsOnCorrection()
+    result = build_graph(engine=engine, llm=llm).invoke(initial_state("Show order dates."))
+
+    assert llm.calls == 2
+    assert result["retry_count"] == 1
+    assert result["llm_error"] is True
+    assert "timed out" in result["error_message"]
+    assert len(result["history"]) == 1
+
+
 def test_execution_validates_before_database(engine):
     executed_statements = []
     event.listen(engine, "before_cursor_execute",
