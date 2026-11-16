@@ -50,6 +50,8 @@ If the environment is not activated, run the same app through its environment ex
 .\.venv\Scripts\streamlit.exe run app.py
 ```
 
+The dashboard shows query results in a dataframe and keeps generated SQL, execution telemetry, and self-correction history in separate collapsed panels. When the result contains a meaningful category/date and numeric measure, it suggests an interactive Plotly bar chart; date dimensions can also use a line chart, and categories with a small number of groups can use a pie chart. Identifier columns such as `id` and `customer_id` are excluded from chart suggestions. Text-only or empty results are shown without a chart.
+
 ## Run tests
 
 ```powershell
