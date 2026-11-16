@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
-from app.guardrails import inspect_with_nemo
+from app.guardrails import GuardrailDecision, inspect_with_nemo
 from app.security import UnsafeQueryError, inspect_user_input, validate_read_only_sql
 
 MAX_RETRIES = 3
@@ -24,6 +24,7 @@ class AgentState(TypedDict, total=False):
     schema: str
     logs: list[str]
     history: list[dict[str, str]]
+    security_blocked: bool
 
 
 def create_engine_from_url(database_url: str | None = None) -> Engine:
@@ -131,10 +132,34 @@ def build_graph(*, engine: Engine | None = None, llm: Any = None):
 
     def guard(state: AgentState) -> AgentState:
         okay, reason = inspect_user_input(state.get("user_query", ""))
+        decision = None
         if okay:
-            okay, reason = inspect_with_nemo(state.get("user_query", ""))
+            decision = inspect_with_nemo(state.get("user_query", ""))
+            # Keep compatibility with older external test doubles while the
+            # application itself uses a typed, auditable decision.
+            if isinstance(decision, tuple):
+                okay, reason = decision
+            else:
+                okay, reason = decision.allowed, decision.message
+        blocked = not okay and decision is not None
+        if blocked:
+            reason = "Security warning: " + reason
+        if not okay:
+            status = "Input blocked by security guardrails."
+        elif decision is None:
+            status = "Input passed basic request checks."
+        elif isinstance(decision, GuardrailDecision):
+            status = {
+                "deterministic_filter": "Input blocked by deterministic security filter.",
+                "deterministic_fallback": "Input passed deterministic fallback; NeMo LLM inspection skipped.",
+                "nemo": "Input passed NeMo Guardrails.",
+                "unavailable": "Input blocked because guardrails could not inspect the request.",
+            }[decision.source]
+        else:
+            status = "Input passed safety inspection."
         return {"error_message": "" if okay else reason,
-                "logs": state.get("logs", []) + (["Input passed safety inspection."] if okay else ["Input blocked by guardrails."])}
+                "security_blocked": blocked,
+                "logs": state.get("logs", []) + [status]}
 
     def select_after_guard(state): return "inspect_schema_node" if not state.get("error_message") else "done"
     def select_after_generate(state): return "execute_query_node" if not state.get("error_message") else "done"

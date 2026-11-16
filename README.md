@@ -60,11 +60,14 @@ The automated tests use a temporary seeded SQLite database and mocked LLM respon
 
 ## Security behavior
 
-- SQLGlot accepts one read-only `SELECT` statement and rejects write operations and multiple statements.
+- SQLGlot parses using SQLite rules and accepts one read-only `SELECT` statement. It rejects malformed or multiple statements, write operations, `SELECT INTO`, locking clauses, and selected SQLite file/extension functions before execution. The same validator runs on initial SQL, corrected SQL, and again immediately before database execution.
 - The app opens SQLite with URI `mode=ro` after the database has been seeded.
-- NeMo Guardrails inspects user input before the SQL-generation node.
+- Raw user input is checked before schema inspection or SQL generation. A deterministic prefilter blocks destructive SQL, common `OR 1=1` tautologies, SQL comment syntax, and script tags. If `OPENAI_API_KEY` is configured, NeMo Guardrails' `self check input` rail also receives the original user text. The application reports whether NeMo ran or the no-key deterministic fallback was used.
+- The deterministic filter is not a substitute described as NeMo inference. Without an API key, NeMo's configuration is initialized and validated, but its model inference is skipped. If NeMo configuration, initialization, or inference fails, the request is blocked (fail closed).
 - The app reads API credentials from `.env`; secrets are not embedded in prompts or output.
 - Results are capped at 1,000 rows.
+
+The tests mock SQL-generation and NeMo model calls. They verify the actual NeMo configuration can load and its rails can initialize locally; they do not make paid/live API requests.
 
 ## Project layout
 

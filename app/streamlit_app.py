@@ -45,6 +45,8 @@ def main() -> None:
             st.write("• " + item)
     with right:
         st.subheader("Results")
+        if state.get("security_blocked"):
+            st.error(state.get("error_message") or "Security warning: request blocked by guardrails.")
         frame = pd.DataFrame(state.get("db_result", []))
         if not frame.empty:
             st.dataframe(frame, use_container_width=True, hide_index=True)
@@ -58,7 +60,7 @@ def main() -> None:
                 st.plotly_chart(chart_fn(frame, x=x_axis, y=y_axis, title=f"{y_axis} by {x_axis}"), use_container_width=True)
         else:
             st.info("No result rows were returned.")
-        if state.get("error_message"):
+        if state.get("error_message") and not state.get("security_blocked"):
             st.error(state["error_message"])
     with st.expander("Self-correction history"):
         if state.get("history"):

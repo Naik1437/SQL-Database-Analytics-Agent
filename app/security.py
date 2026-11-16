@@ -10,11 +10,11 @@ class UnsafeQueryError(ValueError):
 
 
 def validate_read_only_sql(sql: str) -> str:
-    if not sql or not sql.strip():
+    if not isinstance(sql, str) or not sql.strip():
         raise UnsafeQueryError("The generated SQL query is empty.")
     try:
         statements = sqlglot.parse(sql, read="sqlite")
-    except sqlglot.errors.ParseError as exc:
+    except Exception as exc:
         raise UnsafeQueryError("The generated SQL could not be parsed safely.") from exc
     if len(statements) != 1 or statements[0] is None:
         raise UnsafeQueryError("Only one SQL statement is allowed.")
@@ -22,13 +22,33 @@ def validate_read_only_sql(sql: str) -> str:
     allowed_roots = (exp.Select, exp.Union, exp.Intersect, exp.Except)
     if not isinstance(tree, allowed_roots):
         raise UnsafeQueryError("Only read-only SELECT queries are allowed.")
-    forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Alter, exp.Create,
-                 exp.Command, exp.Transaction, exp.Pragma, exp.Attach, exp.Detach)
+    # The SELECT-only root check rejects every standalone write statement. This
+    # additional AST denylist catches nested/embedded write and locking nodes.
+    forbidden_names = (
+        "Insert", "Update", "Delete", "Drop", "Alter", "Create", "TruncateTable",
+        "Merge", "Replace", "Copy", "LoadData", "Command", "Transaction", "Pragma",
+        "Attach", "Detach", "Lock", "Use", "Grant", "Revoke",
+    )
+    forbidden = tuple(getattr(exp, name) for name in forbidden_names if hasattr(exp, name))
     if any(isinstance(node, forbidden) for node in tree.walk()):
         raise UnsafeQueryError("The query contains a prohibited SQL operation.")
-    # SELECT INTO and table-valued side effects are rejected explicitly.
+    # SELECT INTO and SQLite extension/file functions can have side effects or
+    # expose local files even though the outer statement is a SELECT.
     if tree.find(exp.Into):
         raise UnsafeQueryError("SELECT INTO is not allowed.")
+    # A tautological OR can turn a constrained query into an unbounded data
+    # disclosure. Check the parsed expression tree, not SQL text heuristics.
+    for disjunction in tree.find_all(exp.Or):
+        for equality in disjunction.find_all(exp.EQ):
+            left, right = equality.this, equality.expression
+            if (isinstance(left, exp.Literal) and isinstance(right, exp.Literal)
+                    and left.this.casefold() == right.this.casefold()):
+                raise UnsafeQueryError("Tautological OR conditions are not allowed.")
+    unsafe_functions = {"load_extension", "readfile", "writefile"}
+    for node in tree.find_all(exp.Func):
+        name = getattr(node, "name", "") or node.sql_name()
+        if name.lower() in unsafe_functions:
+            raise UnsafeQueryError("The query contains a prohibited SQL function.")
     return sql.strip().rstrip(";").strip()
 
 

@@ -1,12 +1,2 @@
-define user intent inspect user request
-  "ignore previous instructions"
-  "reveal the system prompt"
-  "reveal secrets"
-  "drop table"
-  "delete from"
-  "insert into"
-  "update database"
-
-define flow inspect user request
-  user intent inspect user request
-  bot say "BLOCKED: This request was blocked by the safety policy."
+define bot refuse to respond
+  "BLOCKED: This request was blocked by the SQL analytics safety policy."
