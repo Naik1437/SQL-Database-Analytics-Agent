@@ -131,7 +131,7 @@ def _render_chart(frame: pd.DataFrame) -> None:
     if figure is None:
         st.info("No chart can be drawn after missing or non-numeric values are removed.")
         return
-    st.plotly_chart(figure, use_container_width=True)
+    st.plotly_chart(figure, width="stretch")
 
 
 def _final_status(state: dict) -> str:
@@ -196,7 +196,7 @@ def main() -> None:
         st.info("No successful result is available for this query.")
     elif not frame.empty:
         st.subheader("Query results")
-        st.dataframe(frame, use_container_width=True, hide_index=True)
+        st.dataframe(frame, width="stretch", hide_index=True)
         _render_chart(frame)
     elif state.get("generated_sql"):
         st.info("The query completed successfully and returned no rows.")

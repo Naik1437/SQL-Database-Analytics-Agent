@@ -2,6 +2,12 @@
 
 A natural-language analytics application built with LangGraph, LangChain, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Pandas, and Plotly. The agent reflects the database schema, generates and validates SQL, executes it read-only, and can use database errors to correct a query up to three times.
 
+## Architecture and technologies
+
+The LangGraph `StateGraph` keeps the user question, generated SQL, query results, error, and correction retry count. Before schema inspection, the raw question passes through the deterministic safety filter and configured NeMo input rail (or the documented deterministic-only fallback when no API key is set). The workflow reflects the SQLite schema with SQLAlchemy, asks the configured chat model for one query, validates it with SQLGlot, and executes it through a read-only SQLite connection. A database error is passed with the reflected schema to the correction step, which may retry up to three times. Streamlit presents the result table, SQL, logs, correction history, and suitable Plotly charts.
+
+Technologies: Python 3.11, LangGraph, LangChain, LangChain-OpenAI, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Plotly, Pandas, pytest, and python-dotenv.
+
 ## Requirements
 
 - Windows 10 64-bit
@@ -52,6 +58,14 @@ If the environment is not activated, run the same app through its environment ex
 
 The dashboard shows query results in a dataframe and keeps generated SQL, execution telemetry, and self-correction history in separate collapsed panels. When the result contains a meaningful category/date and numeric measure, it suggests an interactive Plotly bar chart; date dimensions can also use a line chart, and categories with a small number of groups can use a pie chart. Identifier columns such as `id` and `customer_id` are excluded from chart suggestions. Text-only or empty results are shown without a chart.
 
+Example questions:
+
+- Show orders sorted by date.
+- Which product categories generated the most revenue?
+- Show monthly sales revenue.
+- Who are the top five customers by order value?
+- How many orders were placed in each status?
+
 ## Run tests
 
 ```powershell
@@ -74,10 +88,22 @@ The tests mock SQL-generation and NeMo model calls. They verify the actual NeMo 
 ## Project layout
 
 ```text
-app.py                 Root Streamlit entry point
-app/                   LangGraph workflow, validation, guardrails, and UI
-config/guardrails/     NeMo Guardrails configuration
-database/              SQLite seed script and generated local database
-tests/                 Security and self-correction tests
-.env.example           Environment variable template
+app.py                    Root Streamlit entry point
+app/graph.py               LangGraph nodes and workflow
+app/security.py            SQLGlot validation and basic input checks
+app/guardrails.py          NeMo adapter and deterministic prefilter
+app/streamlit_app.py       Streamlit UI and Plotly rendering
+config/guardrails/         NeMo configuration and Colang refusal
+database/seed.py           SQLite schema and sample data seeder
+tests/                     Graph, security, guardrails, and dashboard tests
+.env.example               Environment variable template
+requirements.txt           Python dependencies
+README.md                  Setup, architecture, and usage documentation
 ```
+
+## Known limitations
+
+- Live SQL generation and NeMo model inspection require a valid OpenAI API key and network access. Automated tests mock model calls; live NeMo inference has not been verified as part of this project test suite.
+- Without a key, the deterministic prefilter blocks the implemented common attack patterns, but it does not provide broad semantic prompt-injection classification. The UI labels this path as the fallback.
+- Chart selection is heuristic and relies on meaningful result column names and types; ambiguous date columns may need a recognizable date/time name.
+- Results are limited to 1,000 rows. The sample database is SQLite and the seed command rebuilds its `customers`, `orders`, and `sales` tables.

@@ -10,8 +10,8 @@ def seed_database(path: Path = DB_PATH) -> Path:
     with sqlite3.connect(path) as connection:
         connection.executescript("""
         PRAGMA foreign_keys = ON;
-        DROP TABLE IF EXISTS orders;
         DROP TABLE IF EXISTS sales;
+        DROP TABLE IF EXISTS orders;
         DROP TABLE IF EXISTS customers;
         CREATE TABLE customers (
             customer_id INTEGER PRIMARY KEY, name TEXT NOT NULL,
