@@ -1,65 +1,78 @@
 # SQL & Database Analytics Agent
 
-A modular natural-language analytics application built with LangGraph, LangChain, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Pandas, and Plotly. The agent inspects the actual database schema, generates a query, validates its SQL AST, executes it in read-only mode, and uses database feedback for up to three correction attempts.
-
-## Security behavior
-
-- Every model-produced query is parsed by SQLGlot and must be one read-only `SELECT` (including read-only set operations).
-- Multiple statements and mutating operations are rejected before execution.
-- SQLite connections use URI `mode=ro`; SQLAlchemy sends the query through a read-only connection.
-- NeMo Guardrails inspects user input. The deterministic input gate also rejects empty/oversized prompts and common injection or mutation phrases.
-- API keys are read from `.env` and are never included in prompts, logs, SQL output, or UI.
-- Query results are capped at 1,000 rows for display.
+A natural-language analytics application built with LangGraph, LangChain, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Pandas, and Plotly. The agent reflects the database schema, generates and validates SQL, executes it read-only, and can use database errors to correct a query up to three times.
 
 ## Requirements
 
-Windows 10 64-bit, Python 3.11, Git, and an OpenAI API key. The project uses the existing virtual environment when available. Install missing packages only if needed.
+- Windows 10 64-bit
+- Python 3.11
+- An OpenAI API key for live SQL generation
 
 ## Setup (PowerShell)
 
+From the project directory, create a virtual environment and install the dependencies:
+
 ```powershell
-cd C:\Users\HANMANTHU\SQL-Database-Analytics-Agent
-.\.venv\Scripts\Activate.ps1
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Create your local environment file and edit it to add your API key:
+
+```powershell
 Copy-Item .env.example .env
 notepad .env
-python -m database.seed
 ```
 
-Set `OPENAI_API_KEY` in `.env` to your own key. Optionally set `OPENAI_MODEL`, `DATABASE_URL`, and `NEMO_GUARDRAILS_CONFIG`. Do not paste keys into source files or commit `.env`.
+Set `OPENAI_API_KEY` in `.env`. You can also configure `OPENAI_MODEL`, `DATABASE_URL`, and `NEMO_GUARDRAILS_CONFIG`. The sample database URL is `sqlite:///database/analytics.db`. Keep `.env` private; it is excluded by `.gitignore`.
 
-If the environment is new, install dependencies using `python -m pip install -r requirements.txt`. Pin/lock versions for a production deployment after selecting a supported Python and package set.
+If PowerShell blocks `Activate.ps1`, use the explicit `.venv\Scripts\python.exe` and `.venv\Scripts\streamlit.exe` paths in these instructions; there is no need to change the machine's execution policy.
 
-## Run
+## Seed the SQLite database
 
 ```powershell
-streamlit run app/streamlit_app.py
+.\.venv\Scripts\python.exe -m database.seed
 ```
 
-The sample database is `database/analytics.db`; reseed it with `python -m database.seed`. The seed script is for local development and recreates its sample tables.
+The seed script recreates the sample `customers`, `orders`, and `sales` tables and inserts their sample records. `orders` includes `id` and `order_date`; its existing `order_id` key is retained for the related sales rows.
 
-## Test
+## Run the Streamlit application
+
+With `.venv` activated, the assessment command is:
 
 ```powershell
-pytest -q
+streamlit run app.py
 ```
 
-Tests use a temporary seeded database and mocked LLM responses. They verify SQL write/multi-statement rejection, validation before execution, successful query execution, and correction behavior without requiring an API key.
+If the environment is not activated, run the same app through its environment executable:
+
+```powershell
+.\.venv\Scripts\streamlit.exe run app.py
+```
+
+## Run tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+The automated tests use a temporary seeded SQLite database and mocked LLM responses. They cover read-only SQL validation, database execution, and correction behavior without requiring a live API key.
+
+## Security behavior
+
+- SQLGlot accepts one read-only `SELECT` statement and rejects write operations and multiple statements.
+- The app opens SQLite with URI `mode=ro` after the database has been seeded.
+- NeMo Guardrails inspects user input before the SQL-generation node.
+- The app reads API credentials from `.env`; secrets are not embedded in prompts or output.
+- Results are capped at 1,000 rows.
 
 ## Project layout
 
 ```text
-app/                 LangGraph, guardrails, validation, Streamlit UI
-config/guardrails/   NeMo Guardrails config and input policy
-database/            SQLite seed script and generated local database
-tests/               Security and self-correction tests
-.env.example         Environment variable template
+app.py                 Root Streamlit entry point
+app/                   LangGraph workflow, validation, guardrails, and UI
+config/guardrails/     NeMo Guardrails configuration
+database/              SQLite seed script and generated local database
+tests/                 Security and self-correction tests
+.env.example           Environment variable template
 ```
-
-## Manual steps
-
-1. Restore/install Python 3.11 if the project virtual environment cannot start, then recreate it with `py -3.11 -m venv .venv`.
-2. Activate `.venv`, install any missing requirements, and seed the database.
-3. Add your OpenAI API key to the ignored `.env` file.
-4. Start Streamlit and ask a question about orders, customers, or sales.
-
-The API key is required only for live natural-language generation; tests use fake model responses.

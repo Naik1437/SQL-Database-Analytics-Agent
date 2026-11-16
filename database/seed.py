@@ -18,7 +18,8 @@ def seed_database(path: Path = DB_PATH) -> Path:
             region TEXT NOT NULL, email TEXT NOT NULL UNIQUE
         );
         CREATE TABLE orders (
-            order_id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL,
+            id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL UNIQUE,
+            customer_id INTEGER NOT NULL,
             order_date TEXT NOT NULL, status TEXT NOT NULL,
             total_amount REAL NOT NULL CHECK(total_amount >= 0),
             FOREIGN KEY(customer_id) REFERENCES customers(customer_id)
@@ -35,17 +36,17 @@ def seed_database(path: Path = DB_PATH) -> Path:
           (3,'Maya Singh','South','maya@example.test'),
           (4,'Liam Chen','North','liam@example.test'),
           (5,'Isha Rao','West','isha@example.test');
-        INSERT INTO orders VALUES
-          (1001,1,'2025-01-12','completed',240.00),
-          (1002,2,'2025-01-19','completed',89.50),
-          (1003,3,'2025-02-03','completed',510.00),
-          (1004,1,'2025-02-17','shipped',155.00),
-          (1005,4,'2025-03-08','completed',320.00),
-          (1006,5,'2025-03-21','processing',75.00),
-          (1007,2,'2025-04-02','completed',199.00),
-          (1008,3,'2025-04-16','completed',420.00),
-          (1009,4,'2025-05-05','cancelled',60.00),
-          (1010,5,'2025-05-22','completed',275.00);
+        INSERT INTO orders (id, order_id, customer_id, order_date, status, total_amount) VALUES
+          (1,1001,1,'2025-01-12','completed',240.00),
+          (2,1002,2,'2025-01-19','completed',89.50),
+          (3,1003,3,'2025-02-03','completed',510.00),
+          (4,1004,1,'2025-02-17','shipped',155.00),
+          (5,1005,4,'2025-03-08','completed',320.00),
+          (6,1006,5,'2025-03-21','processing',75.00),
+          (7,1007,2,'2025-04-02','completed',199.00),
+          (8,1008,3,'2025-04-16','completed',420.00),
+          (9,1009,4,'2025-05-05','cancelled',60.00),
+          (10,1010,5,'2025-05-22','completed',275.00);
         INSERT INTO sales VALUES
           (1,1001,'Wireless Mouse','Accessories',2,40.00),
           (2,1001,'USB-C Hub','Accessories',2,80.00),
