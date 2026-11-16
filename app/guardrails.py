@@ -1,8 +1,9 @@
 """Raw-input guardrails with an explicit deterministic fallback.
 
-Known injection patterns are rejected locally before any NeMo call. When an
-API key is configured, the unchanged user text is also inspected by NeMo's
-``self check input`` rail. Without a key, only the deterministic filter runs.
+Known injection patterns are rejected locally before any NeMo call. The
+unchanged user text is also inspected by NeMo's ``self check input`` rail only
+when NEMO_LIVE_INFERENCE is explicitly enabled with its separate OpenAI key.
+Otherwise the deterministic filter is used and no OpenAI inference is called.
 """
 from __future__ import annotations
 
@@ -66,8 +67,7 @@ def _load_rails(config_path: str, model_name: str):
     from nemoguardrails import LLMRails, RailsConfig
 
     config = RailsConfig.from_path(config_path)
-    # The repo config uses OPENAI_MODEL; explicitly resolve it for callers
-    # whose process environment did not load .env.
+    # Resolve the optional NeMo model setting even if callers did not load .env.
     for model in config.models:
         if getattr(model, "type", None) == "main":
             model.model = model_name
@@ -91,9 +91,9 @@ def inspect_with_nemo(user_text: str) -> GuardrailDecision:
     """Inspect raw user text before schema access or SQL generation.
 
     NeMo configuration is initialized even in deterministic-only mode, which
-    catches invalid installations/configuration. Initialization/runtime failures
-    fail closed; absence of an API key uses the documented deterministic-only
-    fallback and does not claim a NeMo inference occurred.
+    catches invalid installations/configuration. Live NeMo inference is a
+    separate explicit opt-in; otherwise this function never calls OpenAI.
+    Initialization/runtime failures fail closed.
     """
     reason = _deterministic_block_reason(user_text)
     if reason:
@@ -106,9 +106,18 @@ def inspect_with_nemo(user_text: str) -> GuardrailDecision:
     except Exception:
         return GuardrailDecision(False, "Security inspection is unavailable; request blocked.", "unavailable")
 
-    if not _has_real_api_key():
+    live_inference = os.getenv("NEMO_LIVE_INFERENCE", "false").strip().casefold() in {
+        "1", "true", "yes", "on",
+    }
+    if not live_inference:
         return GuardrailDecision(True, "NeMo LLM inspection skipped; deterministic fallback used.",
                                  "deterministic_fallback")
+    if not _has_real_api_key():
+        return GuardrailDecision(
+            False,
+            "Live NeMo inference was requested but its separate OPENAI_API_KEY is not configured.",
+            "unavailable",
+        )
     try:
         response = rails.generate(messages=[{"role": "user", "content": user_text}])
         content = _response_content(response)

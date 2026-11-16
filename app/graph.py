@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 
 from app.guardrails import GuardrailDecision, inspect_with_nemo
+from app.llm_provider import create_gemini_chat_model
 from app.security import UnsafeQueryError, inspect_user_input, validate_read_only_sql
 
 MAX_RETRIES = 3
@@ -54,12 +55,23 @@ def inspect_schema_node(state: AgentState, *, engine: Engine) -> AgentState:
 
 
 def _default_llm():
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0)
+    """Build the configured Gemini model used by generation and reflection."""
+    return create_gemini_chat_model()
 
 
 def _content(result: Any) -> str:
-    return str(getattr(result, "content", result)).strip()
+    content = getattr(result, "content", result)
+    if isinstance(content, list):
+        text_parts = []
+        for part in content:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                text_parts.append(part["text"])
+            elif isinstance(getattr(part, "text", None), str):
+                text_parts.append(part.text)
+        return "\n".join(text_parts).strip()
+    return str(content).strip()
 
 
 def _normalize_sql_response(result: Any) -> str:

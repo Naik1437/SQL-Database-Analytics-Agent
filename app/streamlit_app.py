@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import os
 
 import pandas as pd
 import plotly.express as px
@@ -10,6 +9,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from app.graph import build_graph, create_engine_from_url
+from app.llm_provider import GeminiConfigurationError, check_gemini_provider_configuration
 
 load_dotenv()
 
@@ -17,6 +17,7 @@ _IDENTIFIER = re.compile(r"(^id$|_id$|^id_|identifier|^index$|postal|zip$)", re.
 _TIME_NAME = re.compile(r"date|time|month|week|quarter|year", re.IGNORECASE)
 _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b"),
     re.compile(r"(?i)(api[_ -]?key\s*[:=]\s*)[^\s,;]+"),
     re.compile(r"(?i)(password\s*[:=]\s*)[^\s,;]+"),
     re.compile(r"(://[^:/\s]+:)[^@/\s]+(@)"),
@@ -148,8 +149,15 @@ def main() -> None:
     st.set_page_config(page_title="SQL Analytics Agent", page_icon="📊", layout="wide")
     st.title("SQL & Database Analytics Agent")
     st.caption("Ask a business question about the sample sales data. Queries are guarded, validated, and executed read-only.")
-    if not os.getenv("OPENAI_API_KEY"):
-        st.info("Set OPENAI_API_KEY in your local .env file to enable live natural-language SQL generation.")
+    provider_status = check_gemini_provider_configuration()
+    if provider_status.configured:
+        st.success(provider_status.message)
+    else:
+        st.warning(provider_status.message)
+    st.caption(
+        "SQL generation uses Google Gemini. Live NeMo model inspection is separate and stays disabled "
+        "unless NEMO_LIVE_INFERENCE=true."
+    )
 
     with st.form("analytics_query"):
         query = st.text_area(
@@ -169,6 +177,8 @@ def main() -> None:
                         "user_query": query, "generated_sql": "", "db_result": [], "error_message": "",
                         "retry_count": 0, "schema": "", "logs": [], "history": [],
                     })
+            except GeminiConfigurationError as exc:
+                st.error(_safe_display_text(str(exc)))
             except Exception:
                 # Do not render raw exceptions: provider/connection exceptions can
                 # contain credentials. Detailed secrets stay out of the UI/logs.

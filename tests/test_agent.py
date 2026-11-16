@@ -145,6 +145,17 @@ def test_generate_sql_normalizes_fenced_and_unfenced_responses(response):
     assert result["error_message"] == ""
 
 
+def test_generate_sql_extracts_text_from_gemini_content_blocks():
+    class GeminiMessage:
+        content = [{"type": "text", "text": "SELECT * FROM orders"}]
+
+    result = generate_sql_node({"schema": "orders(id INTEGER)", "user_query": "Show orders", "logs": []},
+                               llm=FakeLLM(GeminiMessage()))
+
+    assert result["generated_sql"] == "SELECT * FROM orders"
+    assert result["error_message"] == ""
+
+
 @pytest.mark.parametrize("unsafe_sql", ["DELETE FROM orders", "DROP TABLE orders"])
 def test_unsafe_reflection_correction_never_reaches_database(engine, unsafe_sql):
     executed_statements = []

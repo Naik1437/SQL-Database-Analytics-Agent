@@ -55,6 +55,7 @@ def test_blocked_raw_input_never_calls_llm_or_database(raw_input, tmp_path):
 
 def test_safe_business_question_uses_deterministic_fallback_without_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("NEMO_LIVE_INFERENCE", "false")
     decision = inspect_with_nemo("How many orders were placed last month?")
     assert decision == GuardrailDecision(
         True, "NeMo LLM inspection skipped; deterministic fallback used.", "deterministic_fallback"
@@ -63,6 +64,7 @@ def test_safe_business_question_uses_deterministic_fallback_without_key(monkeypa
 
 def test_nemo_config_loads_and_initializes_without_api_call(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("NEMO_LIVE_INFERENCE", "false")
     rails = _load_rails(str(_config_path()), "gpt-4o-mini")
     assert rails.__class__.__name__ == "LLMRails"
 
@@ -79,6 +81,7 @@ def test_raw_input_is_passed_to_nemo_when_key_is_configured(monkeypatch):
 
     fake = FakeRails()
     monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("NEMO_LIVE_INFERENCE", "true")
     monkeypatch.setattr("app.guardrails._load_rails", lambda *_: fake)
     decision = inspect_with_nemo(raw)
     assert fake.messages == [{"role": "user", "content": raw}]
@@ -92,6 +95,7 @@ def test_nemo_block_response_is_denied(monkeypatch):
             return {"content": "BLOCKED: unsafe input"}
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("NEMO_LIVE_INFERENCE", "true")
     monkeypatch.setattr("app.guardrails._load_rails", lambda *_: FakeRails())
     decision = inspect_with_nemo("a request requiring model safety classification")
     assert not decision.allowed
@@ -101,6 +105,21 @@ def test_nemo_block_response_is_denied(monkeypatch):
 def test_invalid_nemo_configuration_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setenv("NEMO_GUARDRAILS_CONFIG", str(tmp_path / "missing-config"))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("NEMO_LIVE_INFERENCE", "false")
     decision = inspect_with_nemo("How many orders are there?")
     assert not decision.allowed
     assert decision.source == "unavailable"
+
+
+def test_openai_key_alone_does_not_enable_live_nemo(monkeypatch):
+    class ForbiddenRails:
+        def generate(self, **_kwargs):
+            raise AssertionError("NeMo inference must stay opt-in")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only-key")
+    monkeypatch.setenv("NEMO_LIVE_INFERENCE", "false")
+    monkeypatch.setattr("app.guardrails._load_rails", lambda *_: ForbiddenRails())
+    decision = inspect_with_nemo("How many completed orders are there?")
+
+    assert decision.allowed
+    assert decision.source == "deterministic_fallback"
