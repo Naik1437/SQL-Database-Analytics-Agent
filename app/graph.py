@@ -104,8 +104,18 @@ def _invoke_llm(llm: Any, prompt: str) -> Any:
     except Exception as exc:
         error_name = type(exc).__name__.casefold()
         error_text = str(exc).casefold()
+        status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
         if any(token in error_name or token in error_text for token in ("timeout", "deadline")):
             message = "Gemini request timed out after 30 seconds. Check the network and selected model, then retry."
+        elif status == 503 or "service unavailable" in error_text or "overloaded" in error_text:
+            message = (
+                "Gemini generation is temporarily unavailable (API status 503). "
+                "Retry later or select another currently available free-tier model."
+            )
+        elif status == 404 or "model not found" in error_text or "unknown model" in error_text:
+            message = "The configured Gemini model is not available for generation at this API endpoint."
+        elif status == 429 or "resource_exhausted" in error_text or "quota" in error_text:
+            message = "Gemini free-tier quota or rate limit was reached. Wait for quota reset and retry."
         else:
             message = "Gemini request failed. Check the network, API key configuration, model name, and quota."
         raise GeminiRequestError(message) from None

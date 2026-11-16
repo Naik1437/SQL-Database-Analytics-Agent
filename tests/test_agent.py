@@ -115,6 +115,22 @@ def test_gemini_timeout_returns_clear_error_without_leaking_provider_details(eng
     assert result["db_result"] == []
 
 
+def test_gemini_503_returns_service_availability_message_without_details(engine):
+    class UnavailableLLM:
+        def invoke(self, _prompt):
+            error = RuntimeError("503 service unavailable with sensitive request details")
+            error.code = 503
+            raise error
+
+    result = build_graph(engine=engine, llm=UnavailableLLM()).invoke(initial_state("How many orders?"))
+
+    assert result["error_message"] == (
+        "Gemini generation is temporarily unavailable (API status 503). "
+        "Retry later or select another currently available free-tier model."
+    )
+    assert "sensitive request details" not in result["error_message"]
+
+
 def test_reflection_gemini_failure_stops_correction_loop(engine):
     class FailsOnCorrection:
         def __init__(self):

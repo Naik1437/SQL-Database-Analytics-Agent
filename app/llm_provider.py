@@ -62,17 +62,24 @@ def create_gemini_chat_model(
                 "Gemini integration package is unavailable. Install dependencies from requirements.txt."
             ) from None
         model_factory = ChatGoogleGenerativeAI
+    options = {
+        "model": model,
+        "api_key": api_key,
+        "vertexai": False,
+        # ChatGoogleGenerativeAI otherwise allows six SDK retries and an
+        # unbounded request duration, which can leave Streamlit waiting.
+        "request_timeout": GEMINI_REQUEST_TIMEOUT_SECONDS,
+        "retries": 0,
+    }
+    # Gemini 3.x uses thinking_level and no longer accepts temperature/top_p/
+    # top_k sampling controls. A low effort keeps this SQL generation task
+    # responsive while remaining supported by Gemini 3.8 Flash.
+    if model.casefold().startswith("gemini-3"):
+        options["thinking_level"] = "low"
+    else:
+        options["temperature"] = 0
     try:
-        return model_factory(
-            model=model,
-            api_key=api_key,
-            vertexai=False,
-            temperature=0,
-            # ChatGoogleGenerativeAI otherwise allows six SDK retries and an
-            # unbounded request duration, which can leave Streamlit waiting.
-            request_timeout=GEMINI_REQUEST_TIMEOUT_SECONDS,
-            retries=0,
-        )
+        return model_factory(**options)
     except Exception:
         # Provider exceptions can include request/configuration details; do not
         # propagate a diagnostic that might contain credential material.

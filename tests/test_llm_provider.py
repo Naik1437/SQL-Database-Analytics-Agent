@@ -57,6 +57,22 @@ def test_installed_gemini_integration_constructs_without_inference():
     assert model.max_retries == 0
 
 
+def test_gemini_3_factory_uses_supported_low_thinking_settings():
+    captured = {}
+
+    class FakeChatModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    create_gemini_chat_model(
+        {"GOOGLE_API_KEY": "unit-test-key", "GOOGLE_MODEL": "gemini-3.8-flash"},
+        model_factory=FakeChatModel,
+    )
+
+    assert captured["thinking_level"] == "low"
+    assert "temperature" not in captured
+
+
 def test_missing_google_api_key_fails_before_model_construction(monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.setenv("GOOGLE_MODEL", "gemini-test-model")

@@ -8,6 +8,8 @@ The LangGraph `StateGraph` keeps the user question, generated SQL, query results
 
 Gemini requests use a 30-second per-request timeout and disable the SDK's automatic retries. Model failures are returned to the dashboard as credential-safe errors. The graph also has a finite recursion limit as a final safeguard; SQL correction remains capped at three attempts.
 
+Gemini 3 models are configured without deprecated sampling parameters and use low thinking effort for responsive SQL generation. The currently verified example model is `gemini-3.5-flash-lite`; `GOOGLE_MODEL` remains configurable. To diagnose DNS/TLS reachability, API model access, and a minimal generation request through the same LangChain client, run `python -m app.gemini_diagnostic`. The diagnostic reads `.env` but never displays the API key. It sends a short Gemini request and should only be used with a Google AI Studio project configured for free-tier usage.
+
 Technologies: Python 3.11, LangGraph, LangChain, `langchain-google-genai`, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Plotly, Pandas, pytest, and python-dotenv. `langchain-openai` is retained only for the optional live NeMo inference integration; SQL generation uses Gemini.
 
 ## Requirements
