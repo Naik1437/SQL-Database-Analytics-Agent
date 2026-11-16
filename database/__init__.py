@@ -1,0 +1,1 @@
+"""Sample analytics database helpers."""
