@@ -8,6 +8,14 @@ from pathlib import Path
 def inspect_with_nemo(text: str) -> tuple[bool, str]:
     """Use configured NeMo rails when available, with fail-closed behavior on errors."""
     config_path = os.getenv("NEMO_GUARDRAILS_CONFIG", "config/guardrails")
+    # Tests and local setup can run without credentials; preserve a small offline policy.
+    if not os.getenv("OPENAI_API_KEY"):
+        lowered = text.lower()
+        suspicious = ("ignore all previous", "reveal the system prompt", "reveal secrets",
+                      "drop table", "delete from", "insert into", "update database")
+        if any(term in lowered for term in suspicious):
+            return False, "This request was blocked by the safety policy."
+        return True, ""
     if not Path(config_path).exists():
         # Basic policy checks remain active when the optional rails config is unavailable.
         lowered = text.lower()
