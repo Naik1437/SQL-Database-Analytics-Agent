@@ -1,68 +1,121 @@
 # SQL & Database Analytics Agent
 
-A natural-language analytics application built with LangGraph, LangChain, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Pandas, and Plotly. The agent reflects the database schema, generates and validates SQL using Google Gemini, executes it read-only, and can use database errors to correct a query up to three times.
+A natural-language business analytics application that turns questions into safe SQL, executes queries against SQLite, and displays results in a Streamlit dashboard. The workflow uses LangGraph, SQLAlchemy, SQLGlot, Google Gemini, NeMo Guardrails, Pandas, and Plotly.
 
-## Architecture and technologies
+## Assessment verification status
 
-The LangGraph `StateGraph` keeps the user question, generated SQL, query results, error, and correction retry count. Before schema inspection, the raw question passes through the deterministic safety filter. Live NeMo input-model inspection is a separate, explicit opt-in; its deterministic safety checks remain active without it. The workflow reflects the SQLite schema with SQLAlchemy, asks the configured Gemini chat model for one query, validates it with SQLGlot, and executes it through a read-only SQLite connection. A database error is passed with the reflected schema to the correction step, which may retry up to three times. Streamlit presents the result table, SQL, logs, correction history, and suitable Plotly charts.
+- **Live Gemini generation:** Verified with the configured `gemini-3.5-flash-lite` model using the standalone provider diagnostic.
+- **End-to-end workflow:** A live Gemini-backed LangGraph query asking how many orders were placed generated a read-only query and returned an order count of **10** from SQLite.
+- **Automated tests:** The most recent full run completed with **63 passed** and one NeMo deprecation warning. Automated tests mock Gemini and NeMo model inference; they do not make live model requests.
+- **Live NeMo inference:** Not tested. It is disabled by default and is not needed for Gemini SQL generation.
 
-Gemini requests use a 30-second per-request timeout and disable the SDK's automatic retries. Model failures are returned to the dashboard as credential-safe errors. The graph also has a finite recursion limit as a final safeguard; SQL correction remains capped at three attempts.
+The live Gemini verification is separate from pytest. The tests do not make API calls and do not require a real Google or OpenAI API key.
 
-Gemini 3 models are configured without deprecated sampling parameters and use low thinking effort for responsive SQL generation. The currently verified example model is `gemini-3.5-flash-lite`; `GOOGLE_MODEL` remains configurable. To diagnose DNS/TLS reachability, API model access, and a minimal generation request through the same LangChain client, run `python -m app.gemini_diagnostic`. The diagnostic reads `.env` but never displays the API key. It sends a short Gemini request and should only be used with a Google AI Studio project configured for free-tier usage.
+## Architecture
 
-Technologies: Python 3.11, LangGraph, LangChain, `langchain-google-genai`, SQLAlchemy, SQLGlot, NeMo Guardrails, SQLite, Streamlit, Plotly, Pandas, pytest, and python-dotenv. `langchain-openai` is retained only for the optional live NeMo inference integration; SQL generation uses Gemini.
+The LangGraph `StateGraph` tracks `user_query`, `generated_sql`, `db_result`, `error_message`, and `retry_count`. Its workflow:
 
-## Requirements
+1. Checks the raw question with deterministic input guardrails and, if explicitly enabled, the NeMo input rail.
+2. Inspects the available tables and columns using SQLAlchemy reflection.
+3. Asks the configured Gemini chat model to generate one SQLite query.
+4. Validates generated SQL with SQLGlot before executing it through a read-only SQLite connection.
+5. On a database error, sends the error and reflected schema to the correction step. It allows at most three SQL correction retries.
+6. Presents the status, SQL, execution history, result table, and suitable Plotly charts in Streamlit.
 
-- Windows 10 64-bit
+Gemini requests have a 30-second timeout and automatic SDK retries are disabled. Gemini 3 models use the supported low thinking level without deprecated sampling parameters. The graph also has a finite recursion limit as a final safeguard.
+
+## Technology and requirements
+
+- Windows 10, 64-bit
 - Python 3.11
-- A Google AI Studio API key and a model currently eligible for the Gemini API free tier
+- LangGraph and LangChain
+- `langchain-google-genai` for Gemini SQL generation
+- SQLAlchemy and SQLGlot
+- NeMo Guardrails
+- SQLite, Streamlit, Plotly, and Pandas
+- pytest and python-dotenv
+
+`langchain-openai` is retained for the optional OpenAI-backed NeMo inference path only. The normal SQL generation workflow uses Gemini and does not require an OpenAI key.
 
 ## Setup (PowerShell)
 
-From the project directory, create a virtual environment and install the dependencies:
+Run commands from the project directory. Create the virtual environment with Python 3.11:
 
 ```powershell
 py -3.11 -m venv .venv
+```
+
+Install the project dependencies using that environment's interpreter:
+
+```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Create `.env` only if one does not already exist, then edit it to add your Gemini settings. Do not overwrite an existing `.env` because it may contain local credentials:
+If PowerShell allows virtual environment activation, you may activate it with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If activation is blocked by the execution policy, keep using the explicit `.venv\Scripts\python.exe` and `.venv\Scripts\streamlit.exe` commands below. There is no need to change the machine's execution policy.
+
+## Configure Gemini and the database
+
+Create `.env` from the template only if you do not already have a local `.env` file:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+Open the local file to configure the required values:
+
+```powershell
 notepad .env
 ```
 
-Set `GOOGLE_API_KEY` to your Google AI Studio key and `GOOGLE_MODEL` to a model ID shown as free for your project in AI Studio. Free-tier eligibility, quotas, and available model IDs can change, so verify the model in AI Studio and Google's current pricing page. Keep the project on the free tier and do not link a paid billing account if you want to avoid charges. Also set `DATABASE_URL=sqlite:///database/analytics.db` and `NEMO_GUARDRAILS_CONFIG=config/guardrails` as shown in `.env.example`. Keep `NEMO_LIVE_INFERENCE=false` for Gemini-only use. Keep `.env` private; it is excluded by `.gitignore`.
+Set `GOOGLE_API_KEY` to a Google AI Studio key and `GOOGLE_MODEL` to a model that is currently available to your project on the Gemini API free tier. `gemini-3.5-flash-lite` is the model verified for this project; model availability and quotas can change. Check the model and project tier in AI Studio before use. Do not attach paid billing if your goal is to avoid charges.
 
-No OpenAI key is required for SQL generation. Live NeMo model inspection is separate and disabled by default. Setting `NEMO_LIVE_INFERENCE=true` opts into the existing OpenAI-backed NeMo model path and requires its own `OPENAI_API_KEY`; that mode can incur OpenAI charges. The deterministic input filter and NeMo configuration remain enabled while live NeMo model calls are off.
+Keep these settings in the local `.env` file:
 
-If PowerShell blocks `Activate.ps1`, use the explicit `.venv\Scripts\python.exe` and `.venv\Scripts\streamlit.exe` paths in these instructions; there is no need to change the machine's execution policy.
+- `GOOGLE_API_KEY`: your private Google AI Studio API key.
+- `GOOGLE_MODEL`: the Gemini API model ID to use.
+- `DATABASE_URL=sqlite:///database/analytics.db`
+- `NEMO_GUARDRAILS_CONFIG=config/guardrails`
+- `NEMO_LIVE_INFERENCE=false` for Gemini-only usage.
+
+Never paste an API key into source code, prompts, logs, screenshots, or Git. The `.env` file is excluded by `.gitignore`; share only `.env.example`, which contains placeholders and safe defaults.
+
+### Optional NeMo live inference
+
+Live NeMo model inspection is disabled by default. In the default configuration, the deterministic prefilter blocks the implemented destructive SQL, tautology, SQL-comment, and script-tag patterns before schema inspection or Gemini invocation. NeMo configuration initialization is checked locally, but NeMo does not send an inference request in this default mode.
+
+Setting `NEMO_LIVE_INFERENCE=true` enables the separate OpenAI-backed NeMo `self check input` inference path. It requires a separate `OPENAI_API_KEY` and may incur OpenAI charges. Live NeMo inference has **not** been tested for this project. Do not enable it for Gemini-only use.
 
 ## Seed the SQLite database
+
+The seed script creates the sample `customers`, `orders`, and `sales` tables. The `orders` table includes the required `id` and `order_date` columns and retains `order_id` for related sales records. **Running the seed script drops and recreates those sample tables.**
 
 ```powershell
 .\.venv\Scripts\python.exe -m database.seed
 ```
 
-The seed script recreates the sample `customers`, `orders`, and `sales` tables and inserts their sample records. `orders` includes `id` and `order_date`; its existing `order_id` key is retained for the related sales rows.
+The SQLite file is generated locally and is not committed; rerun the seeder to recreate it.
 
 ## Run the Streamlit application
 
-With `.venv` activated, the assessment command is:
+The assessment entry point is the root-level `app.py`. With the virtual environment activated, run the assessment command:
 
 ```powershell
 streamlit run app.py
 ```
 
-If the environment is not activated, run the same app through its environment executable:
+Or launch Streamlit directly from the project virtual environment:
 
 ```powershell
 .\.venv\Scripts\streamlit.exe run app.py
 ```
 
-The dashboard shows query results in a dataframe and keeps generated SQL, execution telemetry, and self-correction history in separate collapsed panels. When the result contains a meaningful category/date and numeric measure, it suggests an interactive Plotly bar chart; date dimensions can also use a line chart, and categories with a small number of groups can use a pie chart. Identifier columns such as `id` and `customer_id` are excluded from chart suggestions. Text-only or empty results are shown without a chart.
+The dashboard includes a natural-language query form, a results dataframe, and separate collapsed expanders for generated SQL, execution telemetry, and self-correction history. It suggests interactive Plotly charts when the result has a meaningful category/date and numeric measure. Bar charts support categories; date dimensions can also use line charts; pie charts are offered for categories with a small number of groups. ID-like columns are excluded. Empty, text-only, or unsuitable results are shown without a chart.
 
 Example questions:
 
@@ -74,43 +127,75 @@ Example questions:
 
 ## Run tests
 
+With the virtual environment activated, run:
+
+```powershell
+python -m pytest -q
+```
+
+Or use the explicit environment interpreter without activation:
+
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The automated tests use temporary SQLite databases and mocked model responses. They cover read-only SQL validation, provider configuration, database execution, and correction behavior without Google or OpenAI credentials and without paid API calls.
+The test suite uses temporary SQLite databases and mocked Gemini/NeMo model inference. It covers read-only SQL validation, mutation and multi-statement rejection, raw-input blocking, schema reflection, database execution, retry limits, SQL correction, provider configuration, dashboard chart logic, and timeout/error display. It does not make live Gemini or NeMo inference calls.
 
 ## Security behavior
 
-- SQLGlot parses using SQLite rules and accepts one read-only `SELECT` statement. It rejects malformed or multiple statements, write operations, `SELECT INTO`, locking clauses, and selected SQLite file/extension functions before execution. The same validator runs on initial SQL, corrected SQL, and again immediately before database execution.
-- The app opens SQLite with URI `mode=ro` after the database has been seeded.
-- Raw user input is checked before schema inspection or SQL generation. A deterministic prefilter blocks destructive SQL, common `OR 1=1` tautologies, SQL comment syntax, and script tags. Live NeMo `self check input` inference runs only when `NEMO_LIVE_INFERENCE=true` and a separate `OPENAI_API_KEY` is configured; otherwise only the deterministic fallback runs. If NeMo configuration, initialization, or opted-in inference fails, the request is blocked (fail closed).
-- Gemini SQL generation reads `GOOGLE_API_KEY` and `GOOGLE_MODEL` from `.env`. A local provider check confirms both are set without making a network call or displaying the key.
-- API credentials are not written to prompts or logs. The `.env` file is excluded by `.gitignore`.
-- Results are capped at 1,000 rows.
+- SQLGlot parses with the SQLite dialect and accepts only one read-only query structure. It rejects malformed SQL, multiple statements, write operations such as `INSERT`, `UPDATE`, `DELETE`, `DROP`, and `ALTER`, `SELECT INTO`, locking clauses, and selected SQLite file/extension functions.
+- The same AST validator checks initial and corrected SQL and runs again immediately before database execution. Unsafe SQL is never sent to the database.
+- SQLite connections use URI `mode=ro` after the database has been seeded. Results are limited to 1,000 rows.
+- Raw user input is checked before schema inspection and SQL generation. The deterministic prefilter decodes common URL/HTML encodings and blocks destructive commands, common tautologies such as `OR 1=1`, SQL comments, and script tags.
+- NeMo live `self check input` inference runs only when explicitly enabled and its separate OpenAI key is configured. Otherwise the deterministic fallback is used. Guardrails initialization or enabled-inference failures fail closed.
+- Gemini settings are read from `.env`. The local configuration check does not make a network request or display the key. Dashboard errors are sanitized to avoid exposing credentials.
 
-The tests mock Gemini and NeMo model calls. They verify the NeMo configuration can load and initialize locally; they do not make live Gemini or NeMo inference calls.
-
-## Project layout
+## Project structure
 
 ```text
-app.py                    Root Streamlit entry point
-app/graph.py               LangGraph nodes and workflow
-app/security.py            SQLGlot validation and basic input checks
-app/guardrails.py          NeMo adapter and deterministic prefilter
-app/streamlit_app.py       Streamlit UI and Plotly rendering
-config/guardrails/         NeMo configuration and Colang refusal
-database/seed.py           SQLite schema and sample data seeder
-tests/                     Graph, security, guardrails, and dashboard tests
-.env.example               Environment variable template
-requirements.txt           Python dependencies
-README.md                  Setup, architecture, and usage documentation
+SQL-Database-Analytics-Agent/
+├── .env                         Local credentials; ignored by Git
+├── .env.example                 Safe environment template
+├── .gitignore                   Secret and generated-file exclusions
+├── README.md                    Setup, architecture, verification, and usage
+├── requirements.txt             Python dependencies
+├── app.py                       Root Streamlit assessment entry point
+├── app/
+│   ├── __init__.py
+│   ├── __main__.py               Module entry point
+│   ├── gemini_diagnostic.py      Credential-safe Gemini connectivity check
+│   ├── graph.py                  LangGraph state, nodes, and workflow
+│   ├── guardrails.py             NeMo adapter and deterministic input filter
+│   ├── llm_provider.py           Gemini provider configuration and factory
+│   ├── security.py               SQLGlot validation and input checks
+│   └── streamlit_app.py          Streamlit UI and Plotly visualization
+├── config/
+│   └── guardrails/
+│       ├── config.yml            NeMo Guardrails configuration
+│       └── rails.co              Colang refusal response
+├── database/
+│   ├── __init__.py
+│   ├── analytics.db              Generated locally by the seed script; ignored
+│   └── seed.py                   SQLite schema and sample-data seeder
+└── tests/
+    ├── __init__.py
+    ├── test_agent.py             Graph, execution, retry, and correction tests
+    ├── test_dashboard.py         Chart suitability and rendering tests
+    ├── test_gemini_diagnostic.py Safe diagnostic error tests
+    ├── test_guardrails.py        Input blocking and table-integrity tests
+    ├── test_llm_provider.py      Gemini configuration tests
+    ├── test_security.py          SQL AST security tests
+    ├── test_seed.py              Seed schema and repeatability tests
+    └── test_streamlit_timeout.py Streamlit error-rendering test
 ```
+
+The virtual environment, Python caches, pytest cache, and local IDE settings are development artifacts and are not part of the application package.
 
 ## Known limitations
 
-- Live SQL generation requires a valid Gemini API key, an eligible model, network access, and available free-tier quota. Automated tests mock the model; a live Gemini request has not been verified.
-- Live NeMo model inspection remains a separate optional OpenAI-backed integration. It is disabled unless `NEMO_LIVE_INFERENCE=true`; that mode has not been exercised live and may incur charges.
-- Without a key, the deterministic prefilter blocks the implemented common attack patterns, but it does not provide broad semantic prompt-injection classification. The UI labels this path as the fallback.
-- Chart selection is heuristic and relies on meaningful result column names and types; ambiguous date columns may need a recognizable date/time name.
-- Results are limited to 1,000 rows. The sample database is SQLite and the seed command rebuilds its `customers`, `orders`, and `sales` tables.
+- Live Gemini generation and an end-to-end LangGraph query were tested with the configured free-tier model; a successful run returned an order count of 10 from SQLite. Availability, quota, network behavior, and free-tier eligibility depend on the Google AI Studio project.
+- Automated tests mock Gemini and NeMo inference. They verify workflow behavior without spending API quota; the separate live Gemini verification is not part of pytest.
+- Live NeMo inference remains disabled by default and has not been tested. Enabling it requires a separate OpenAI API key and may incur charges.
+- The deterministic input filter catches common attack patterns but does not provide broad semantic prompt-injection classification when live NeMo inference is disabled.
+- Chart selection is heuristic and depends on meaningful result column names and types. Ambiguous date columns may need a recognizable date/time name.
+- The seed script recreates its sample tables; do not point it at a database containing data you need to preserve.
