@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -57,7 +58,24 @@ def _default_llm():
 
 
 def _content(result: Any) -> str:
-    return str(getattr(result, "content", result)).strip().strip("`")
+    return str(getattr(result, "content", result)).strip()
+
+
+def _normalize_sql_response(result: Any) -> str:
+    """Remove optional Markdown SQL fences and return the contained SQL text."""
+    sql = _content(result)
+    if sql.startswith("```"):
+        sql = sql[3:].strip()
+        if sql.endswith("```"):
+            sql = sql[:-3].strip()
+    lines = sql.splitlines()
+    if lines and lines[0].strip().lower() in {"sql", "sqlite"}:
+        sql = "\n".join(lines[1:]).strip()
+    else:
+        # Also tolerate one-line fences such as ```sql SELECT ... ```.
+        sql = re.sub(r"^(?:sql|sqlite)\s+(?=(?:SELECT|WITH)\b)", "", sql,
+                     count=1, flags=re.IGNORECASE)
+    return sql
 
 
 def generate_sql_node(state: AgentState, *, llm: Any) -> AgentState:
@@ -65,10 +83,7 @@ def generate_sql_node(state: AgentState, *, llm: Any) -> AgentState:
               "Use only the schema below. Return SQL only.\n\nSchema:\n" + state.get("schema", "") +
               "\n\nQuestion: " + state.get("user_query", ""))
     try:
-        response = llm.invoke(prompt)
-        sql = _content(response)
-        sql = sql.removeprefix("```sql").removeprefix("```SQL").removesuffix("```").strip()
-        sql = validate_read_only_sql(sql)
+        sql = validate_read_only_sql(_normalize_sql_response(llm.invoke(prompt)))
         return {"generated_sql": sql, "error_message": "",
                 "logs": state.get("logs", []) + ["Generated and validated read-only SQL."]}
     except Exception as exc:
@@ -100,8 +115,7 @@ def reflection_node(state: AgentState, *, llm: Any) -> AgentState:
               "\nFailed SQL:\n" + state.get("generated_sql", "") + "\nDatabase error:\n" +
               state.get("error_message", ""))
     try:
-        sql = _content(llm.invoke(prompt)).removeprefix("```sql").removesuffix("```").strip()
-        sql = validate_read_only_sql(sql)
+        sql = validate_read_only_sql(_normalize_sql_response(llm.invoke(prompt)))
         return {"generated_sql": sql, "retry_count": state.get("retry_count", 0) + 1,
                 "error_message": "", "logs": state.get("logs", []) +
                 [f"Self-correction attempt {state.get('retry_count', 0) + 1} generated validated SQL."]}
@@ -122,23 +136,24 @@ def build_graph(*, engine: Engine | None = None, llm: Any = None):
         return {"error_message": "" if okay else reason,
                 "logs": state.get("logs", []) + (["Input passed safety inspection."] if okay else ["Input blocked by guardrails."])}
 
-    def select_after_guard(state): return "schema" if not state.get("error_message") else "done"
-    def select_after_generate(state): return "execute" if not state.get("error_message") else "done"
-    def select_after_execute(state): return "reflect" if state.get("error_message") and state.get("retry_count", 0) < MAX_RETRIES else "done"
-    def select_after_reflect(state): return "execute" if state.get("generated_sql") and not state.get("error_message") else ("reflect" if state.get("retry_count", 0) < MAX_RETRIES else "done")
+    def select_after_guard(state): return "inspect_schema_node" if not state.get("error_message") else "done"
+    def select_after_generate(state): return "execute_query_node" if not state.get("error_message") else "done"
+    def select_after_execute(state): return "reflection_node" if state.get("error_message") and state.get("retry_count", 0) < MAX_RETRIES else "done"
+    def select_after_reflect(state): return "execute_query_node" if state.get("generated_sql") and not state.get("error_message") else ("reflection_node" if state.get("retry_count", 0) < MAX_RETRIES else "done")
 
     graph = StateGraph(AgentState)
     graph.add_node("guard", guard)
-    graph.add_node("inspect_schema", lambda s: inspect_schema_node(s, engine=engine))
-    graph.add_node("generate_sql", lambda s: generate_sql_node(s, llm=llm))
-    graph.add_node("execute_query", lambda s: execute_query_node(s, engine=engine))
-    graph.add_node("reflection", lambda s: reflection_node(s, llm=llm))
+    graph.add_node("inspect_schema_node", lambda s: inspect_schema_node(s, engine=engine))
+    graph.add_node("generate_sql_node", lambda s: generate_sql_node(s, llm=llm))
+    graph.add_node("execute_query_node", lambda s: execute_query_node(s, engine=engine))
+    graph.add_node("reflection_node", lambda s: reflection_node(s, llm=llm))
     graph.add_edge(START, "guard")
-    graph.add_conditional_edges("guard", select_after_guard, {"schema": "inspect_schema", "done": END})
-    graph.add_edge("inspect_schema", "generate_sql")
-    graph.add_conditional_edges("generate_sql", select_after_generate, {"execute": "execute_query", "done": END})
-    graph.add_conditional_edges("execute_query", select_after_execute, {"reflect": "reflection", "done": END})
-    graph.add_conditional_edges("reflection", select_after_reflect, {"execute": "execute_query", "reflect": "reflection", "done": END})
+    graph.add_conditional_edges("guard", select_after_guard,
+                                {"inspect_schema_node": "inspect_schema_node", "done": END})
+    graph.add_edge("inspect_schema_node", "generate_sql_node")
+    graph.add_conditional_edges("generate_sql_node", select_after_generate, {"execute_query_node": "execute_query_node", "done": END})
+    graph.add_conditional_edges("execute_query_node", select_after_execute, {"reflection_node": "reflection_node", "done": END})
+    graph.add_conditional_edges("reflection_node", select_after_reflect, {"execute_query_node": "execute_query_node", "reflection_node": "reflection_node", "done": END})
     return graph.compile()
 
 
